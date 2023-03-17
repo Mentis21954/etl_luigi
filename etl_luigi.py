@@ -31,7 +31,7 @@ class clean_the_artist_content(luigi.Task):
         return extract_info_from_all_artists(self.artist_names)
 
     def run(self):
-        df = pd.read_json('artist_contents.json')
+        df = pd.read_json(self.input().path)
         print(df.head())
 
 class extract_titles_from_artist(luigi.Task):
