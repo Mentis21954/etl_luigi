@@ -13,17 +13,26 @@ class extract_info_from_all_artists(luigi.Task):
         return luigi.LocalTarget('artist_contents.json')
 
     def run(self):
-        artist_contents = {}
+        artist_contents = []
         for name in self.artist_names:
             url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + name + (
                 '&api_key=') + LASTFM_API_KEY + ('&format=json')
             artist_info = requests.get(url).json()
-            artist_contents.update({name: artist_info['artist']['bio']['content']})
+            artist_contents.append(artist_info['artist']['bio']['content'])
             print('Search infrmation for artist {} ...'.format(name))
 
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps(artist_contents))
+            outfile.write(json.dumps({'Artist': self.artist_names, 'Content': artist_contents}))
 
+
+class clean_the_artist_content(luigi.Task):
+    artist_names = luigi.ListParameter()
+    def requires(self):
+        return extract_info_from_all_artists(self.artist_names)
+
+    def run(self):
+        df = pd.read_json('artist_contents.json')
+        print(df.head())
 
 class extract_titles_from_artist(luigi.Task):
     name = luigi.Parameter()
@@ -45,19 +54,20 @@ class extract_titles_from_artist(luigi.Task):
         releases_df = pd.json_normalize(releases['releases'])
 
         # store the tracks info in a list
-        tracks_info = []
+        title_info, colab_info, year_info, format_info, price_info = [], [], [], [], []
         for index, url in enumerate(releases_df['resource_url'].values):
             source = requests.get(url).json()
             # search if exists track's price
             if 'lowest_price' in source.keys():
                 # print(str(index) + ': '+ str(source['title'])+ ' '+ str(source['lowest_price']))
+                title_info.append(source['title'])
+                colab_info.append(releases_df['artist'].iloc[index])
+                year_info.append(source['year'])
+                price_info.append(source['lowest_price'])
                 if 'formats' in source.keys():
-                    tracks_info.append((source['title'], releases_df['artist'].iloc[index], source['year'],
-                                        source['formats'][0]['name'], source['lowest_price']))
+                    format_info.append(source['formats'][0]['name'])
                 else:
-                    tracks_info.append(
-                        (source['title'], releases_df['artist'].iloc[index], source['year'], None,
-                         source['lowest_price']))
+                    format_info.append(None)
                 print('Found ' + str((index + 1)) + ' titles!')
 
             # sleep 3 secs to don't miss requests
@@ -65,10 +75,14 @@ class extract_titles_from_artist(luigi.Task):
 
         print('Find tracks from artist ' + self.name + ' with Discogs ID: ' + str(id))
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps({'Artist': self.name, 'Track Info': tracks_info}))
+            outfile.write(json.dumps({'Artist': self.name, 'Title': title_info, 'Collaborations': colab_info,
+                                      'Year': year_info, 'Format': format_info, 'Discogs Price': price_info}))
+
 
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
-    luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
-    luigi.build([extract_titles_from_artist(artist_names[0]), extract_titles_from_artist(artist_names[1])], local_scheduler=True)
+    #luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
+    #luigi.build([extract_titles_from_artist(artist_names[0]), extract_titles_from_artist(artist_names[1])],
+    #            local_scheduler=True)
+    luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
