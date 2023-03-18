@@ -16,10 +16,10 @@ class extract_info_from_all_artists(luigi.Task):
         artist_contents = []
         for name in self.artist_names:
             url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + name + (
-                '&api_key=') + LASTFM_API_KEY + ('&format=json')
+                '&api_key=') + LASTFM_API_KEY + '&format=json'
             artist_info = requests.get(url).json()
             artist_contents.append(artist_info['artist']['bio']['content'])
-            print('Search infrmation for artist {} ...'.format(name))
+            print('Search information for artist {} ...'.format(name))
 
         with self.output().open('w') as outfile:
             outfile.write(json.dumps({'Artist': self.artist_names, 'Content': artist_contents}))
@@ -27,12 +27,24 @@ class extract_info_from_all_artists(luigi.Task):
 
 class clean_the_artist_content(luigi.Task):
     artist_names = luigi.ListParameter()
+
     def requires(self):
         return extract_info_from_all_artists(self.artist_names)
 
+    def output(self):
+        return luigi.LocalTarget(self.input().path)
+
     def run(self):
-        df = pd.read_json(self.input().path)
-        print(df.head())
+        contents_df = pd.read_json(self.input().path)
+        print(contents_df.head())
+        # remove new line command and html tags
+        contents_df['Content'] = contents_df['Content'].replace('\n', '', regex=True)
+        contents_df['Content'] = contents_df['Content'].replace(r'<[^<>]*>', '', regex=True)
+        print('Clean the informations texts')
+
+        with self.output().open('w') as outfile:
+            outfile.write(json.dumps(contents_df.to_json(orient='columns')))
+
 
 class extract_titles_from_artist(luigi.Task):
     name = luigi.Parameter()
@@ -42,7 +54,7 @@ class extract_titles_from_artist(luigi.Task):
 
     def run(self):
         # get the artist id from artist name
-        url = ('https://api.discogs.com/database/search?q=') + self.name + ('&{?type=artist}&token=') + DISCOGS_API_KEY
+        url = 'https://api.discogs.com/database/search?q=' + self.name + ('&{?type=artist}&token=') + DISCOGS_API_KEY
         discogs_artist_info = requests.get(url).json()
         id = discogs_artist_info['results'][0]['id']
 
@@ -79,10 +91,28 @@ class extract_titles_from_artist(luigi.Task):
                                       'Year': year_info, 'Format': format_info, 'Discogs Price': price_info}))
 
 
+class remove_null_prices(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return extract_titles_from_artist(self.name)
+
+    def output(self):
+        return luigi.LocalTarget('{}_transformed_releases.json'.format(self.name))
+
+    def run(self):
+        df = pd.read_json(self.input().path)
+        # find and remove the rows/titles where there are no selling prices in discogs.com
+        df = df[df['Discogs Price'].notna()]
+        print('Remove tracks where there no selling price in discogs.com')
+        print(df.head())
+        with self.output().open('w') as outfile:
+            outfile.write(json.dumps(df.to_json(orient='columns')))
+
+
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
-    #luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
-    #luigi.build([extract_titles_from_artist(artist_names[0]), extract_titles_from_artist(artist_names[1])],
-    #            local_scheduler=True)
+    # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
     luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
+    luigi.build([remove_null_prices(artist_names[0])], local_scheduler=True)
