@@ -131,9 +131,18 @@ class drop_duplicates_titles(luigi.Task):
             outfile.write(df.to_json(orient='columns', compression='infer'))
 
 
+class Workflow(luigi.Task):
+    artist_names = luigi.ListParameter()
+    name = luigi.Parameter()
+
+    def requires(self):
+        return [clean_the_artist_content(self.artist_names), remove_null_prices(self.name), drop_duplicates_titles(self.name)]
+
+
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
     # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
-    luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
-    luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
+    #luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
+    #luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
+    luigi.build([Workflow(artist_names= artist_names[:2], name=artist_names[0])], local_scheduler=True)
