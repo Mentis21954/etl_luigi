@@ -35,6 +35,7 @@ class clean_the_artist_content(luigi.Task):
         return luigi.LocalTarget(self.input().path)
 
     def run(self):
+        # read the input file and store as a dataframe
         contents_df = pd.read_json(self.input().path)
         print(contents_df.head())
         # remove new line command and html tags
@@ -43,7 +44,7 @@ class clean_the_artist_content(luigi.Task):
         print('Clean the informations texts')
 
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps(contents_df.to_json(orient='columns')))
+            outfile.write(contents_df.to_json(orient='columns', compression='infer'))
 
 
 class extract_titles_from_artist(luigi.Task):
@@ -101,13 +102,33 @@ class remove_null_prices(luigi.Task):
         return luigi.LocalTarget('{}_transformed_releases.json'.format(self.name))
 
     def run(self):
+        # read the input file and store as a dataframe
         df = pd.read_json(self.input().path)
         # find and remove the rows/titles where there are no selling prices in discogs.com
         df = df[df['Discogs Price'].notna()]
         print('Remove tracks where there no selling price in discogs.com')
+        with self.output().open('w') as outfile:
+            outfile.write(df.to_json(orient='columns', compression='infer'))
+
+
+class drop_duplicates_titles(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return remove_null_prices(self.name)
+
+    def output(self):
+        return luigi.LocalTarget(self.input().path)
+
+    def run(self):
+        # read the input file and store as a dataframe
+        df = pd.read_json(self.input().path)
+        # find and remove the duplicates titles
+        df = df.drop_duplicates(subset=['Title'])
+        print('find and remove the duplicates titles')
         print(df.head())
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps(df.to_json(orient='columns')))
+            outfile.write(df.to_json(orient='columns', compression='infer'))
 
 
 if __name__ == '__main__':
@@ -115,4 +136,4 @@ if __name__ == '__main__':
     artist_names = list(df['Artist Name'].unique())
     # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
     luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
-    luigi.build([remove_null_prices(artist_names[0])], local_scheduler=True)
+    luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
