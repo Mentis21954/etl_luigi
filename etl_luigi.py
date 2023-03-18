@@ -13,16 +13,17 @@ class extract_info_from_all_artists(luigi.Task):
         return luigi.LocalTarget('artist_contents.json')
 
     def run(self):
-        artist_contents = []
+        artist_contents = {}
         for name in self.artist_names:
             url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + name + (
                 '&api_key=') + LASTFM_API_KEY + '&format=json'
             artist_info = requests.get(url).json()
-            artist_contents.append(artist_info['artist']['bio']['content'])
+            artist_contents.update({name: artist_info['artist']['bio']['content']})
             print('Search information for artist {} ...'.format(name))
 
+        contents_df = pd.DataFrame(artist_contents.values(), columns=['Content'], index=artist_contents.keys())
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps({'Artist': self.artist_names, 'Content': artist_contents}))
+            outfile.write(contents_df.to_json(orient='index'))
 
 
 class clean_the_artist_content(luigi.Task):
@@ -36,15 +37,15 @@ class clean_the_artist_content(luigi.Task):
 
     def run(self):
         # read the input file and store as a dataframe
-        contents_df = pd.read_json(self.input().path)
-        print(contents_df.head())
+        contents_df = pd.read_json(self.input().path, orient='index')
         # remove new line command and html tags
         contents_df['Content'] = contents_df['Content'].replace('\n', '', regex=True)
         contents_df['Content'] = contents_df['Content'].replace(r'<[^<>]*>', '', regex=True)
         print('Clean the informations texts')
+        print(contents_df.head())
 
         with self.output().open('w') as outfile:
-            outfile.write(contents_df.to_json(orient='columns', compression='infer'))
+            outfile.write(contents_df.to_json(orient='index'))
 
 
 class extract_titles_from_artist(luigi.Task):
@@ -88,7 +89,7 @@ class extract_titles_from_artist(luigi.Task):
 
         print('Find tracks from artist ' + self.name + ' with Discogs ID: ' + str(id))
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps({'Artist': self.name, 'Title': title_info, 'Collaborations': colab_info,
+            outfile.write(json.dumps({'Title': title_info, 'Collaborations': colab_info,
                                       'Year': year_info, 'Format': format_info, 'Discogs Price': price_info}))
 
 
@@ -99,7 +100,7 @@ class remove_null_prices(luigi.Task):
         return extract_titles_from_artist(self.name)
 
     def output(self):
-        return luigi.LocalTarget('{}_transformed_releases.json'.format(self.name))
+        return luigi.LocalTarget(self.input().path)
 
     def run(self):
         # read the input file and store as a dataframe
@@ -118,7 +119,7 @@ class drop_duplicates_titles(luigi.Task):
         return remove_null_prices(self.name)
 
     def output(self):
-        return luigi.LocalTarget(self.input().path)
+        return luigi.LocalTarget('{}_transformed_releases.json'.format(self.name))
 
     def run(self):
         # read the input file and store as a dataframe
@@ -126,23 +127,27 @@ class drop_duplicates_titles(luigi.Task):
         # find and remove the duplicates titles
         df = df.drop_duplicates(subset=['Title'])
         print('find and remove the duplicates titles')
+        df = pd.DataFrame(data={'Collaborations': df['Collaborations'].values, 'Year': df['Year'].values,
+                           'Format': df['Format'].values,
+                           'Discogs Price': df['Discogs Price'].values}, index=(df['Title'].values))
         print(df.head())
         with self.output().open('w') as outfile:
-            outfile.write(df.to_json(orient='columns', compression='infer'))
+            outfile.write(df.to_json(orient='index', compression='infer'))
 
 
-class Workflow(luigi.Task):
+
+class Workflow(luigi.WrapperTask):
     artist_names = luigi.ListParameter()
-    name = luigi.Parameter()
 
     def requires(self):
-        return [clean_the_artist_content(self.artist_names), remove_null_prices(self.name), drop_duplicates_titles(self.name)]
+        return [clean_the_artist_content(self.artist_names), remove_null_prices(self.artist_names[0]),
+                drop_duplicates_titles(self.artist_names[0])]
 
 
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
     # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
-    #luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
-    #luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
-    luigi.build([Workflow(artist_names= artist_names[:2], name=artist_names[0])], local_scheduler=True)
+    # luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
+    # luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
+    luigi.build([Workflow(artist_names=artist_names[:2])], local_scheduler=True)
