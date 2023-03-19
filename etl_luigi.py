@@ -128,11 +128,33 @@ class drop_duplicates_titles(luigi.Task):
         df = df.drop_duplicates(subset=['Title'])
         print('find and remove the duplicates titles')
         df = pd.DataFrame(data={'Collaborations': df['Collaborations'].values, 'Year': df['Year'].values,
-                           'Format': df['Format'].values,
-                           'Discogs Price': df['Discogs Price'].values}, index=(df['Title'].values))
+                                'Format': df['Format'].values,
+                                'Discogs Price': df['Discogs Price'].values}, index=(df['Title'].values))
         print(df.head())
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='index', compression='infer'))
+
+
+class integrate_data(luigi.Task):
+    artist_names = luigi.ListParameter()
+
+    def requires(self):
+        return {'artist_contents': clean_the_artist_content(self.artist_names),
+                'artist_releases': drop_duplicates_titles(self.artist_names[0])}
+
+    def output(self):
+        return luigi.LocalTarget('target.json')
+    def run(self):
+        contents_df = pd.read_json(self.input()['artist_contents'].path, orient='index')
+        print(contents_df.head())
+        releases = {'Artist': self.artist_names[0],
+                    'Description': contents_df['Content'][str(self.artist_names[0])]
+                    }
+        with self.input()['artist_releases'].open('r') as artist_releases_file:
+            releases.update({'Releases': json.load(artist_releases_file)})
+
+        with self.output().open('w') as outfile:
+            outfile.write(json.dumps(releases))
 
 
 
@@ -140,8 +162,7 @@ class Workflow(luigi.WrapperTask):
     artist_names = luigi.ListParameter()
 
     def requires(self):
-        return [clean_the_artist_content(self.artist_names), remove_null_prices(self.artist_names[0]),
-                drop_duplicates_titles(self.artist_names[0])]
+        return integrate_data(artist_names=self.artist_names)
 
 
 if __name__ == '__main__':
@@ -150,4 +171,4 @@ if __name__ == '__main__':
     # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
     # luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
     # luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
-    luigi.build([Workflow(artist_names=artist_names[:2])]) #,local_scheduler=True)
+    luigi.build([integrate_data(artist_names=artist_names[:2])], local_scheduler=True)
