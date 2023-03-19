@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import requests
 import json
+import pymongo
 from constants import LASTFM_API_KEY, DISCOGS_API_KEY
 
 
@@ -19,7 +20,7 @@ class extract_info_from_all_artists(luigi.Task):
                 '&api_key=') + LASTFM_API_KEY + '&format=json'
             artist_info = requests.get(url).json()
             artist_contents.update({name: artist_info['artist']['bio']['content']})
-            print('Search information for artist {} ...'.format(name))
+            print('Search description from lastfm.com for artist {} ...'.format(name))
 
         contents_df = pd.DataFrame(artist_contents.values(), columns=['Content'], index=artist_contents.keys())
         with self.output().open('w') as outfile:
@@ -60,7 +61,7 @@ class extract_titles_from_artist(luigi.Task):
         discogs_artist_info = requests.get(url).json()
         id = discogs_artist_info['results'][0]['id']
 
-        print('Search titles from artist ' + self.name + '...')
+        print('Search releases from for discogs.com for artist ' + self.name + '...')
 
         # with id get artist's releases
         url = ('https://api.discogs.com/artists/') + str(id) + ('/releases')
@@ -126,7 +127,7 @@ class drop_duplicates_titles(luigi.Task):
         df = pd.read_json(self.input().path)
         # find and remove the duplicates titles
         df = df.drop_duplicates(subset=['Title'])
-        print('find and remove the duplicates titles')
+        print('find and remove the duplicates titles if exist')
         df = pd.DataFrame(data={'Collaborations': df['Collaborations'].values, 'Year': df['Year'].values,
                                 'Format': df['Format'].values,
                                 'Discogs Price': df['Discogs Price'].values}, index=(df['Title'].values))
@@ -143,7 +144,7 @@ class integrate_data(luigi.Task):
                 'artist_releases': drop_duplicates_titles(self.artist_names[0])}
 
     def output(self):
-        return luigi.LocalTarget('target.json')
+        return luigi.LocalTarget(self.input()['artist_releases'].path)
     def run(self):
         contents_df = pd.read_json(self.input()['artist_contents'].path, orient='index')
         print(contents_df.head())
@@ -153,8 +154,24 @@ class integrate_data(luigi.Task):
         with self.input()['artist_releases'].open('r') as artist_releases_file:
             releases.update({'Releases': json.load(artist_releases_file)})
 
+        print('Integrate the description and releases for artist {}'.format(self.artist_names[0]))
         with self.output().open('w') as outfile:
             outfile.write(json.dumps(releases))
+
+class load_to_database(luigi.Task):
+    artist_names = luigi.ListParameter()
+    client = pymongo.MongoClient("mongodb://localhost:27017/")
+    db = client["mydatabase"]
+    artists = db['artists']
+
+    def requires(self):
+        return integrate_data(artist_names=self.artist_names)
+
+    def run(self):
+        with self.input().open('r') as input_file:
+            artist_info = json.load(input_file)
+        self.artists.insert_one(artist_info)
+        print('Artist {} insert to DataBase!'.format(artist_names[0]))
 
 
 
@@ -171,4 +188,4 @@ if __name__ == '__main__':
     # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
     # luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
     # luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
-    luigi.build([integrate_data(artist_names=artist_names[:2])], local_scheduler=True)
+    luigi.build([load_to_database(artist_names=artist_names[:2])], local_scheduler=True)
