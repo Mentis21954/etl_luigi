@@ -188,4 +188,4 @@ if __name__ == '__main__':
     # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
     # luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
     # luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
-    luigi.build([load_to_database(artist_names=artist_names[:2])], local_scheduler=True)
+    luigi.build([load_to_database(artist_names=artist_names[:2])])
