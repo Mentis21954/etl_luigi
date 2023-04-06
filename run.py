@@ -144,19 +144,18 @@ class integrate_data(luigi.Task):
                 'artist_releases': drop_duplicates_titles(self.artist_names[0])}
 
     def output(self):
-        return luigi.LocalTarget(self.input()['artist_releases'].path)
+        return luigi.LocalTarget('artists.json')
+    
     def run(self):
-        contents_df = pd.read_json(self.input()['artist_contents'].path, orient='index')
-        print(contents_df.head())
-        releases = {'Artist': self.artist_names[0],
-                    'Description': contents_df['Content'][str(self.artist_names[0])]
-                    }
+        with self.input()['artist_contents'].open('r') as artist_content_file:
+            content = json.load(artist_content_file)
+      
         with self.input()['artist_releases'].open('r') as artist_releases_file:
-            releases.update({'Releases': json.load(artist_releases_file)})
-
+            content.update({self.artist_names[0]: {'Description': content[self.artist_names[0]]['Content'],
+                                                   'Releases': json.load(artist_releases_file)}})
         print('Integrate the description and releases for artist {}'.format(self.artist_names[0]))
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps(releases))
+            outfile.write(json.dumps({self.artist_names[0]: content[self.artist_names[0]]}))
 
 
 class load_to_database(luigi.Task):
@@ -170,12 +169,19 @@ class load_to_database(luigi.Task):
 
     def run(self):
         with self.input().open('r') as input_file:
-            artist_info = json.load(input_file)
-        self.artists.insert_one(artist_info)
-        print('Artist {} insert to DataBase!'.format(artist_names[0]))
+            data = json.load(input_file)
+
+            for artist in list(data.keys()):
+                self.artists.insert_one({'Artist': str(artist), 
+                                        'Description': data[str(artist)]['Description'],
+                                        'Releases': data[str(artist)]['Releases']
+                                        })
+                print('Artist {} insert to DataBase!'.format(artist_names[0]))
 
 
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
+
+    #luigi.build([clean_the_artist_content(artist_names=artist_names[:2])])
     luigi.build([load_to_database(artist_names=artist_names[:2])])
