@@ -61,7 +61,7 @@ class extract_titles_from_artist(luigi.Task):
         discogs_artist_info = requests.get(url).json()
         id = discogs_artist_info['results'][0]['id']
 
-        print('Search releases from for discogs.com for artist ' + self.name + '...')
+        print('Search releases from discogs.com for artist {} ...'.format(str(self.name)))
 
         # with id get artist's releases
         url = ('https://api.discogs.com/artists/') + str(id) + ('/releases')
@@ -74,7 +74,7 @@ class extract_titles_from_artist(luigi.Task):
             source = requests.get(url).json()
             # search if exists track's price
             if 'lowest_price' in source.keys():
-                # print(str(index) + ': '+ str(source['title'])+ ' '+ str(source['lowest_price']))
+
                 title_info.append(source['title'])
                 colab_info.append(releases_df['artist'].iloc[index])
                 year_info.append(source['year'])
@@ -120,7 +120,7 @@ class drop_duplicates_titles(luigi.Task):
         return remove_null_prices(self.name)
 
     def output(self):
-        return luigi.LocalTarget('{}_transformed_releases.json'.format(self.name))
+        return luigi.LocalTarget(self.input().path)
 
     def run(self):
         # read the input file and store as a dataframe
@@ -158,9 +158,10 @@ class integrate_data(luigi.Task):
         with self.output().open('w') as outfile:
             outfile.write(json.dumps(releases))
 
+
 class load_to_database(luigi.Task):
     artist_names = luigi.ListParameter()
-    client = pymongo.MongoClient("mongodb://localhost:27017/")
+    client = pymongo.MongoClient("mongodb+srv://user:AotD8lF0WspDIA4i@cluster0.qtikgbg.mongodb.net/?retryWrites=true&w=majority")
     db = client["mydatabase"]
     artists = db['artists']
 
@@ -174,18 +175,7 @@ class load_to_database(luigi.Task):
         print('Artist {} insert to DataBase!'.format(artist_names[0]))
 
 
-
-class Workflow(luigi.WrapperTask):
-    artist_names = luigi.ListParameter()
-
-    def requires(self):
-        return integrate_data(artist_names=self.artist_names)
-
-
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
-    # luigi.build([extract_info_from_all_artists(artist_names[:2])], local_scheduler=True)
-    # luigi.build([clean_the_artist_content(artist_names[:2])], local_scheduler=True)
-    # luigi.build([drop_duplicates_titles(artist_names[0])], local_scheduler=True)
     luigi.build([load_to_database(artist_names=artist_names[:2])])
