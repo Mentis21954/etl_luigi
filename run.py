@@ -176,12 +176,11 @@ class load_to_database(luigi.Task):
                                         'Description': data[str(artist)]['Description'],
                                         'Releases': data[str(artist)]['Releases']
                                         })
-                print('Artist {} insert to DataBase!'.format(artist_names[0]))
+                print('Artist {} insert to DataBase!'.format(artist))
 
 
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
 
-    #luigi.build([clean_the_artist_content(artist_names=artist_names[:2])])
     luigi.build([load_to_database(artist_names=artist_names[:2])])
