@@ -7,44 +7,21 @@ import pymongo
 from constants import LASTFM_API_KEY, DISCOGS_API_KEY
 
 
-class extract_info_from_all_artists(luigi.Task):
-    artist_names = luigi.ListParameter()
+class extract_info_from_artist(luigi.Task):
+    name = luigi.Parameter()
 
     def output(self):
-        return luigi.LocalTarget('artist_contents.json')
+        return luigi.LocalTarget('data/{}/{}_content.json'.format(self.name, self.name))
 
     def run(self):
         artist_contents = {}
-        for name in self.artist_names:
-            url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + name + (
+        url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + self.name + (
                 '&api_key=') + LASTFM_API_KEY + '&format=json'
-            artist_info = requests.get(url).json()
-            artist_contents.update({name: artist_info['artist']['bio']['content']})
-            print('Search description from lastfm.com for artist {} ...'.format(name))
+        artist_info = requests.get(url).json()
+        artist_contents.update({self.name: artist_info['artist']['bio']['content']})
+        print('Search description from lastfm.com for artist {} ...'.format(self.name))
 
         contents_df = pd.DataFrame(artist_contents.values(), columns=['Content'], index=artist_contents.keys())
-        with self.output().open('w') as outfile:
-            outfile.write(contents_df.to_json(orient='index'))
-
-
-class clean_the_artist_content(luigi.Task):
-    artist_names = luigi.ListParameter()
-
-    def requires(self):
-        return extract_info_from_all_artists(self.artist_names)
-
-    def output(self):
-        return luigi.LocalTarget(self.input().path)
-
-    def run(self):
-        # read the input file and store as a dataframe
-        contents_df = pd.read_json(self.input().path, orient='index')
-        # remove new line command and html tags
-        contents_df['Content'] = contents_df['Content'].replace('\n', '', regex=True)
-        contents_df['Content'] = contents_df['Content'].replace(r'<[^<>]*>', '', regex=True)
-        print('Clean the informations texts')
-        print(contents_df.head())
-
         with self.output().open('w') as outfile:
             outfile.write(contents_df.to_json(orient='index'))
 
@@ -53,7 +30,7 @@ class extract_titles_from_artist(luigi.Task):
     name = luigi.Parameter()
 
     def output(self):
-        return luigi.LocalTarget('{}_releases.json'.format(self.name))
+        return luigi.LocalTarget('data/{}/{}_releases.json'.format(self.name, self.name))
 
     def run(self):
         # get the artist id from artist name
@@ -85,13 +62,34 @@ class extract_titles_from_artist(luigi.Task):
                     format_info.append(None)
                 print('Found ' + str((index + 1)) + ' titles!')
 
-            # sleep 3 secs to don't miss requests
-            time.sleep(3)
+            # sleep 5 secs to don't miss requests
+            time.sleep(5)
 
         print('Find tracks from artist ' + self.name + ' with Discogs ID: ' + str(id))
         with self.output().open('w') as outfile:
             outfile.write(json.dumps({'Title': title_info, 'Collaborations': colab_info,
                                       'Year': year_info, 'Format': format_info, 'Discogs Price': price_info}))
+
+
+class clean_the_artist_content(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return extract_info_from_artist(self.name)
+
+    def output(self):
+        return luigi.LocalTarget(self.input().path)
+
+    def run(self):
+        # read the input file and store as a dataframe
+        contents_df = pd.read_json(self.input().path, orient='index')
+        # remove new line command and html tags
+        contents_df['Content'] = contents_df['Content'].replace('\n', '', regex=True)
+        contents_df['Content'] = contents_df['Content'].replace(r'<[^<>]*>', '', regex=True)
+        print('Clean the informations texts')
+
+        with self.output().open('w') as outfile:
+            outfile.write(contents_df.to_json(orient='index'))
 
 
 class remove_null_prices(luigi.Task):
@@ -137,25 +135,28 @@ class drop_duplicates_titles(luigi.Task):
 
 
 class integrate_data(luigi.Task):
-    artist_names = luigi.ListParameter()
+    name = luigi.Parameter()
 
     def requires(self):
-        return {'artist_contents': clean_the_artist_content(self.artist_names),
-                'artist_releases': drop_duplicates_titles(self.artist_names[0])}
+        return {'artist_content': clean_the_artist_content(self.name),
+                'artist_releases': drop_duplicates_titles(self.name)}
 
     def output(self):
-        return luigi.LocalTarget('artists.json')
+        return luigi.LocalTarget('data/{}/{}.json'.format(self.name, self.name))
     
     def run(self):
-        with self.input()['artist_contents'].open('r') as artist_content_file:
+        # read specific artist content file
+        with self.input()['artist_content'].open('r') as artist_content_file:
             content = json.load(artist_content_file)
       
+        # read specific artist releases file
         with self.input()['artist_releases'].open('r') as artist_releases_file:
-            content.update({self.artist_names[0]: {'Description': content[self.artist_names[0]]['Content'],
+            # add the releases to content dict
+            content.update({self.name: {'Description': content[self.name]['Content'],
                                                    'Releases': json.load(artist_releases_file)}})
-        print('Integrate the description and releases for artist {}'.format(self.artist_names[0]))
+        print('Integrate the description and releases for artist {}'.format(self.name))
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps({self.artist_names[0]: content[self.artist_names[0]]}))
+            outfile.write(json.dumps({self.name: content[self.name]}))
 
 
 class load_to_database(luigi.Task):
@@ -165,22 +166,25 @@ class load_to_database(luigi.Task):
     artists = db['artists']
 
     def requires(self):
-        return integrate_data(artist_names=self.artist_names)
+        for name in self.artist_names:
+            yield integrate_data(name)
 
     def run(self):
-        with self.input().open('r') as input_file:
-            data = json.load(input_file)
+        data = {}
+        for name in self.artist_names:
+            with open('data/{}/{}.json'.format(name, name)) as artist_file:
+                data.update(json.load(artist_file)) 
 
-            for artist in list(data.keys()):
-                self.artists.insert_one({'Artist': str(artist), 
-                                        'Description': data[str(artist)]['Description'],
-                                        'Releases': data[str(artist)]['Releases']
-                                        })
-                print('Artist {} insert to DataBase!'.format(artist))
+        for artist in list(data.keys()):
+            self.artists.insert_one({'Artist': str(artist), 
+                                    'Description': data[str(artist)]['Description'],
+                                    'Releases': data[str(artist)]['Releases']
+                                    })
+            print('Artist {} insert to DataBase!'.format(artist))
 
 
 if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
 
-    luigi.build([load_to_database(artist_names=artist_names[:2])])
+    luigi.build([load_to_database(artist_names=artist_names[:3])], workers=3)
