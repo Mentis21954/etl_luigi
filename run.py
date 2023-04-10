@@ -4,7 +4,9 @@ import time
 import requests
 import json
 import pymongo
-from constants import LASTFM_API_KEY, DISCOGS_API_KEY
+
+LASTFM_API_KEY = '3f8f9f826bc4b0c8b529828839d38e4b'
+DISCOGS_API_KEY = 'hhNKFVCSbBWJATBYMyIxxjCJDSuDZMBGnCapdhOy'
 
 
 class extract_info_from_artist(luigi.Task):
