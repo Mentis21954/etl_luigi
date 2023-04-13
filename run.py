@@ -45,32 +45,34 @@ class extract_titles_from_artist(luigi.Task):
         # with id get artist's releases
         url = ('https://api.discogs.com/artists/') + str(id) + ('/releases')
         releases = requests.get(url).json()
-        releases_df = pd.json_normalize(releases['releases'])
 
-        # store the tracks info in a list
-        title_info, colab_info, year_info, format_info, price_info = [], [], [], [], []
-        for index, url in enumerate(releases_df['resource_url'].values):
+        # store the releases/tracks info in a list of dictionaries
+        releases_info = []
+        for index in range(len(releases['releases'])):
+            url = releases['releases'][index]['resource_url']
             source = requests.get(url).json()
             # search if exists track's price
-            if 'lowest_price' in source.keys():
-
-                title_info.append(source['title'])
-                colab_info.append(releases_df['artist'].iloc[index])
-                year_info.append(source['year'])
-                price_info.append(source['lowest_price'])
+            if 'lowest_price' in source.keys():  
                 if 'formats' in source.keys():
-                    format_info.append(source['formats'][0]['name'])
+                    releases_info.append({'Title': source['title'],
+                                        'Collaborations': releases['releases'][index]['artist'],
+                                        'Year': source['year'],
+                                        'Format': source['formats'][0]['name'],
+                                        'Discogs Price': source['lowest_price']})
                 else:
-                    format_info.append(None)
+                    releases_info.append({'Title': source['title'],
+                                        'Collaborations': releases['releases'][index]['artist'],
+                                        'Year': source['year'],
+                                        'Format': None,
+                                        'Discogs Price': source['lowest_price']})
                 print('Found ' + str((index + 1)) + ' titles!')
 
             # sleep 5 secs to don't miss requests
             time.sleep(5)
 
-        print('Find tracks from artist ' + self.name + ' with Discogs ID: ' + str(id))
+        print('Find releases  from artist ' + self.name + ' with Discogs ID: ' + str(id))
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps({'Title': title_info, 'Collaborations': colab_info,
-                                      'Year': year_info, 'Format': format_info, 'Discogs Price': price_info}))
+            outfile.write(json.dumps(releases_info))
 
 
 class clean_the_artist_content(luigi.Task):
@@ -108,7 +110,7 @@ class remove_null_prices(luigi.Task):
         df = pd.read_json(self.input().path)
         # find and remove the rows/titles where there are no selling prices in discogs.com
         df = df[df['Discogs Price'].notna()]
-        print('Remove tracks where there no selling price in discogs.com')
+        print('Remove releases where there no selling price in discogs.com')
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='columns', compression='infer'))
 
