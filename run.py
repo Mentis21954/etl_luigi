@@ -23,9 +23,9 @@ class extract_info_from_artist(luigi.Task):
         artist_contents.update({self.name: artist_info['artist']['bio']['content']})
         print('Search description from lastfm.com for artist {} ...'.format(self.name))
 
-        contents_df = pd.DataFrame(artist_contents.values(), columns=['Content'], index=artist_contents.keys())
+        content_df = pd.DataFrame(artist_contents.values(), columns=['Content'], index=artist_contents.keys())
         with self.output().open('w') as outfile:
-            outfile.write(contents_df.to_json(orient='index'))
+            outfile.write(content_df.to_json(orient='index'))
 
 
 class extract_titles_from_artist(luigi.Task):
@@ -70,7 +70,7 @@ class extract_titles_from_artist(luigi.Task):
             # sleep 5 secs to don't miss requests
             time.sleep(5)
 
-        print('Find releases  from artist ' + self.name + ' with Discogs ID: ' + str(id))
+        print('Found releases from artist ' + self.name + ' with Discogs ID: ' + str(id))
         with self.output().open('w') as outfile:
             outfile.write(json.dumps(releases_info))
 
@@ -86,17 +86,19 @@ class clean_the_artist_content(luigi.Task):
 
     def run(self):
         # read the input file and store as a dataframe
-        contents_df = pd.read_json(self.input().path, orient='index')
-        # remove new line command and html tags
-        contents_df['Content'] = contents_df['Content'].replace('\n', '', regex=True)
-        contents_df['Content'] = contents_df['Content'].replace(r'<[^<>]*>', '', regex=True)
+        content_df = pd.read_json(self.input().path, orient='index')
+        # remove new line commands, html tags and "", ''
+        content_df['Content'] = content_df['Content'].replace(r'\r+|\n+|\t+', '', regex=True)
+        content_df['Content'] = content_df['Content'].replace(r'<[^<>]*>', '', regex=True)
+        content_df['Content'] = content_df['Content'].replace(r'"', '', regex=True)
+        content_df['Content'] = content_df['Content'].replace(r"'", '', regex=True)
         print('Clean the informations texts')
 
         with self.output().open('w') as outfile:
-            outfile.write(contents_df.to_json(orient='index'))
+            outfile.write(content_df.to_json(orient='index'))
 
 
-class remove_null_prices(luigi.Task):
+class remove_wrong_values(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
@@ -111,6 +113,10 @@ class remove_null_prices(luigi.Task):
         # find and remove the rows/titles where there are no selling prices in discogs.com
         df = df[df['Discogs Price'].notna()]
         print('Remove releases where there no selling price in discogs.com')
+        # keep only the rows has positive value of year
+        df = df[df['Year'] > 0]
+        print('Remove releases where there no selling price in discogs.com')
+        
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='columns', compression='infer'))
 
@@ -119,7 +125,7 @@ class drop_duplicates_titles(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
-        return remove_null_prices(self.name)
+        return remove_wrong_values(self.name)
 
     def output(self):
         return luigi.LocalTarget(self.input().path)
@@ -191,4 +197,4 @@ if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
 
-    luigi.build([load_to_database(artist_names=artist_names[:3])], workers=3)
+    luigi.build([load_to_database(artist_names=artist_names[:2])], workers=2)
