@@ -20,12 +20,11 @@ class extract_info_from_artist(luigi.Task):
         url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + self.name + (
                 '&api_key=') + LASTFM_API_KEY + '&format=json'
         artist_info = requests.get(url).json()
-        artist_contents.update({self.name: artist_info['artist']['bio']['content']})
+        artist_contents.update({self.name: {'Content': artist_info['artist']['bio']['content']}})
         print('Search description from lastfm.com for artist {} ...'.format(self.name))
 
-        content_df = pd.DataFrame(artist_contents.values(), columns=['Content'], index=artist_contents.keys())
         with self.output().open('w') as outfile:
-            outfile.write(content_df.to_json(orient='index'))
+            outfile.write(json.dumps(artist_contents))
 
 
 class extract_titles_from_artist(luigi.Task):
@@ -46,33 +45,88 @@ class extract_titles_from_artist(luigi.Task):
         url = ('https://api.discogs.com/artists/') + str(id) + ('/releases')
         releases = requests.get(url).json()
 
-        # store the releases/tracks info in a list of dictionaries
+        print('Found releases from artist ' + self.name + ' with Discogs ID: ' + str(id))
+
+        with self.output().open('w') as outfile:
+            outfile.write(json.dumps({self.name: releases['releases']}))
+
+
+class extract_info_for_titles(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return extract_titles_from_artist(self.name)
+
+    def output(self):
+        return luigi.LocalTarget('data/{}/{}_releases_info.json'.format(self.name, self.name))
+        
+    def run(self):
+        # read releases file to find info for each release title
+        with self.input().open('r') as releases_file:
+            releases = json.load(releases_file)
+
+        # store the releases/tracks info in a list
         releases_info = []
-        for index in range(len(releases['releases'])):
-            url = releases['releases'][index]['resource_url']
+        for index in range(len(releases[self.name])):
+            url = releases[self.name][index]['resource_url']
             source = requests.get(url).json()
             # search if exists track's price
             if 'lowest_price' in source.keys():  
                 if 'formats' in source.keys():
                     releases_info.append({'Title': source['title'],
-                                        'Collaborations': releases['releases'][index]['artist'],
-                                        'Year': source['year'],
-                                        'Format': source['formats'][0]['name'],
-                                        'Discogs Price': source['lowest_price']})
+                                            'Collaborations': releases[self.name][index]['artist'],
+                                            'Year': source['year'],
+                                            'Format': source['formats'][0]['name'],
+                                            'Discogs Price': source['lowest_price']})
                 else:
                     releases_info.append({'Title': source['title'],
-                                        'Collaborations': releases['releases'][index]['artist'],
-                                        'Year': source['year'],
-                                        'Format': None,
-                                        'Discogs Price': source['lowest_price']})
-                print('Found ' + str((index + 1)) + ' titles!')
-
-            # sleep 5 secs to don't miss requests
+                                            'Collaborations': releases[self.name][index]['artist'],
+                                            'Year': source['year'],
+                                            'Format': None,
+                                            'Discogs Price': source['lowest_price']})
+            print('Found informations from discogs.com for {} titles'.format(str((index + 1))))
+            # sleep 3 secs to don't miss requests
             time.sleep(5)
 
-        print('Found releases from artist ' + self.name + ' with Discogs ID: ' + str(id))
         with self.output().open('w') as outfile:
             outfile.write(json.dumps(releases_info))
+
+
+class extract_listeners_from_titles_by_artist(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return extract_titles_from_artist(self.name)
+
+    def output(self):
+        return luigi.LocalTarget('data/{}/{}_listeners.json'.format(self.name, self.name))
+    
+    def run(self):
+        # read releases file to find listeners
+        with self.input().open('r') as releases_file:
+            releases = json.load(releases_file)
+
+        print('Search listeners for each release title for artist {}'.format(self.name))
+        # initialize list for listeners for each title
+        listeners = []
+        for index in range(len(releases[self.name])):
+            title = releases[self.name][index]['title']
+            url = 'https://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=' + LASTFM_API_KEY + '&artist=' + self.name + '&track='+ title + '&format=json'
+
+            try:
+                source = requests.get(url).json()
+                if 'track' in source.keys():
+                    listeners.append({'Title': source['track']['name'],
+                                    'Last.fm Listeners': source['track']['listeners']})
+                    print('Found listeners from last.fm for title {}'.format(title))
+                else:
+                    print('Not found listeners from last.fm for title {}'.format(title))
+            except:
+                print('Not found listeners from last.fm for title {}'.format(title))
+                continue
+
+        with self.output().open('w') as outfile:
+            outfile.write(json.dumps(listeners))
 
 
 class clean_the_artist_content(luigi.Task):
@@ -102,7 +156,7 @@ class remove_wrong_values(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
-        return extract_titles_from_artist(self.name)
+        return extract_info_for_titles(self.name)
 
     def output(self):
         return luigi.LocalTarget(self.input().path)
@@ -121,25 +175,41 @@ class remove_wrong_values(luigi.Task):
             outfile.write(df.to_json(orient='columns', compression='infer'))
 
 
+class merge_titles_data(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return {'listeners': extract_listeners_from_titles_by_artist(self.name),
+                'artist_releases': remove_wrong_values(self.name)}
+
+    def output(self):
+        return luigi.LocalTarget(self.input()['artist_releases'].path)
+    
+    def run(self):
+        releases_df = pd.read_json(self.input()['artist_releases'].path)
+        listeners_df = pd.read_json(self.input()['listeners'].path)
+        df = pd.merge(releases_df, listeners_df, on='Title')
+        print('Merge releases and listeners data')
+        
+        with self.output().open('w') as outfile:
+            outfile.write(df.to_json(orient='records', compression='infer'))
+
+
 class drop_duplicates_titles(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
-        return remove_wrong_values(self.name)
+        return merge_titles_data(self.name)
 
     def output(self):
         return luigi.LocalTarget(self.input().path)
 
     def run(self):
-        # read the input file and store as a dataframe
         df = pd.read_json(self.input().path)
-        # find and remove the duplicates titles
         df = df.drop_duplicates(subset=['Title'])
         print('find and remove the duplicates titles if exist')
-        df = pd.DataFrame(data={'Collaborations': df['Collaborations'].values, 'Year': df['Year'].values,
-                                'Format': df['Format'].values,
-                                'Discogs Price': df['Discogs Price'].values}, index=(df['Title'].values))
-        print(df.head())
+        df =  df.set_index('Title')
+    
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='index', compression='infer'))
 
@@ -163,7 +233,7 @@ class integrate_data(luigi.Task):
         with self.input()['artist_releases'].open('r') as artist_releases_file:
             # add the releases to content dict
             content.update({self.name: {'Description': content[self.name]['Content'],
-                                                   'Releases': json.load(artist_releases_file)}})
+                                        'Releases': json.load(artist_releases_file)}})
         print('Integrate the description and releases for artist {}'.format(self.name))
         with self.output().open('w') as outfile:
             outfile.write(json.dumps({self.name: content[self.name]}))
