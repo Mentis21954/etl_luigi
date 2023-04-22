@@ -189,7 +189,7 @@ class merge_titles_data(luigi.Task):
         playcounts_df = pd.read_json(self.input()['playcounts'].path)
 
         df = pd.merge(releases_df, playcounts_df, on='Title')
-        print('Merge releases and listeners data')
+        print('Merge releases and playcounts data')
         
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='records', compression='infer'))
