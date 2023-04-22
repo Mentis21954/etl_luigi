@@ -84,7 +84,7 @@ class extract_info_for_titles(luigi.Task):
                                             'Year': source['year'],
                                             'Format': None,
                                             'Discogs Price': source['lowest_price']})
-            print('Found informations from discogs.com for {} titles'.format(str((index + 1))))
+            print("Found informations from discogs.com for {} {}'s titles".format(str((index + 1)), self.name))
             # sleep 3 secs to don't miss requests
             time.sleep(5)
 
@@ -92,23 +92,22 @@ class extract_info_for_titles(luigi.Task):
             outfile.write(json.dumps(releases_info))
 
 
-class extract_listeners_from_titles_by_artist(luigi.Task):
+class extract_playcounts_from_titles_by_artist(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
         return extract_titles_from_artist(self.name)
 
     def output(self):
-        return luigi.LocalTarget('data/{}/{}_listeners.json'.format(self.name, self.name))
+        return luigi.LocalTarget('data/{}/{}_playcounts.json'.format(self.name, self.name))
     
     def run(self):
         # read releases file to find listeners
         with self.input().open('r') as releases_file:
             releases = json.load(releases_file)
 
-        print('Search listeners for each release title for artist {}'.format(self.name))
-        # initialize list for listeners for each title
-        listeners = []
+        # initialize list for playcounts for each title
+        playcounts = []
         for index in range(len(releases[self.name])):
             title = releases[self.name][index]['title']
             url = 'https://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=' + LASTFM_API_KEY + '&artist=' + self.name + '&track='+ title + '&format=json'
@@ -116,17 +115,17 @@ class extract_listeners_from_titles_by_artist(luigi.Task):
             try:
                 source = requests.get(url).json()
                 if 'track' in source.keys():
-                    listeners.append({'Title': source['track']['name'],
-                                    'Last.fm Listeners': source['track']['listeners']})
-                    print('Found listeners from last.fm for title {}'.format(title))
+                    playcounts.append({'Title': source['track']['name'],
+                                    'Lastfm Playcount': source['track']['playcount']})
+                    print('Found playcount from last.fm for title {}'.format(title))
                 else:
-                    print('Not found listeners from last.fm for title {}'.format(title))
+                    print('Not found playcount from last.fm for title {}'.format(title))
             except:
-                print('Not found listeners from last.fm for title {}'.format(title))
+                print('Not found playcount from last.fm for title {}'.format(title))
                 continue
 
         with self.output().open('w') as outfile:
-            outfile.write(json.dumps(listeners))
+            outfile.write(json.dumps(playcounts))
 
 
 class clean_the_artist_content(luigi.Task):
@@ -179,7 +178,7 @@ class merge_titles_data(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
-        return {'listeners': extract_listeners_from_titles_by_artist(self.name),
+        return {'playcounts': extract_playcounts_from_titles_by_artist(self.name),
                 'artist_releases': remove_wrong_values(self.name)}
 
     def output(self):
@@ -187,8 +186,9 @@ class merge_titles_data(luigi.Task):
     
     def run(self):
         releases_df = pd.read_json(self.input()['artist_releases'].path)
-        listeners_df = pd.read_json(self.input()['listeners'].path)
-        df = pd.merge(releases_df, listeners_df, on='Title')
+        playcounts_df = pd.read_json(self.input()['playcounts'].path)
+
+        df = pd.merge(releases_df, playcounts_df, on='Title')
         print('Merge releases and listeners data')
         
         with self.output().open('w') as outfile:
