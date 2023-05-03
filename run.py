@@ -18,7 +18,7 @@ class extract_info_from_artist(luigi.Task):
     def run(self):
         artist_contents = {}
         url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + self.name + (
-                '&api_key=') + LASTFM_API_KEY + '&format=json'
+            '&api_key=') + LASTFM_API_KEY + '&format=json'
         artist_info = requests.get(url).json()
         artist_contents.update({self.name: {'Content': artist_info['artist']['bio']['content']}})
         print('Search description from lastfm.com for artist {} ...'.format(self.name))
@@ -59,7 +59,7 @@ class extract_info_for_titles(luigi.Task):
 
     def output(self):
         return luigi.LocalTarget('data/{}/{}_releases_info.json'.format(self.name, self.name))
-        
+
     def run(self):
         # read releases file to find info for each release title
         with self.input().open('r') as releases_file:
@@ -71,19 +71,19 @@ class extract_info_for_titles(luigi.Task):
             url = releases[self.name][index]['resource_url']
             source = requests.get(url).json()
             # search if exists track's price
-            if 'lowest_price' in source.keys():  
+            if 'lowest_price' in source.keys():
                 if 'formats' in source.keys():
                     releases_info.append({'Title': source['title'],
-                                            'Collaborations': releases[self.name][index]['artist'],
-                                            'Year': source['year'],
-                                            'Format': source['formats'][0]['name'],
-                                            'Discogs Price': source['lowest_price']})
+                                          'Collaborations': releases[self.name][index]['artist'],
+                                          'Year': source['year'],
+                                          'Format': source['formats'][0]['name'],
+                                          'Discogs Price': source['lowest_price']})
                 else:
                     releases_info.append({'Title': source['title'],
-                                            'Collaborations': releases[self.name][index]['artist'],
-                                            'Year': source['year'],
-                                            'Format': None,
-                                            'Discogs Price': source['lowest_price']})
+                                          'Collaborations': releases[self.name][index]['artist'],
+                                          'Year': source['year'],
+                                          'Format': None,
+                                          'Discogs Price': source['lowest_price']})
             print("Found informations from discogs.com for {} {}'s titles".format(str((index + 1)), self.name))
             # sleep 3 secs to don't miss requests
             time.sleep(5)
@@ -100,7 +100,7 @@ class extract_playcounts_from_titles_by_artist(luigi.Task):
 
     def output(self):
         return luigi.LocalTarget('data/{}/{}_playcounts.json'.format(self.name, self.name))
-    
+
     def run(self):
         # read releases file to find listeners
         with self.input().open('r') as releases_file:
@@ -110,13 +110,13 @@ class extract_playcounts_from_titles_by_artist(luigi.Task):
         playcounts = []
         for index in range(len(releases[self.name])):
             title = releases[self.name][index]['title']
-            url = 'https://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=' + LASTFM_API_KEY + '&artist=' + self.name + '&track='+ title + '&format=json'
+            url = 'https://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=' + LASTFM_API_KEY + '&artist=' + self.name + '&track=' + title + '&format=json'
 
             try:
                 source = requests.get(url).json()
                 if 'track' in source.keys():
                     playcounts.append({'Title': source['track']['name'],
-                                    'Lastfm Playcount': source['track']['playcount']})
+                                       'Lastfm Playcount': source['track']['playcount']})
                     print('Found playcount from last.fm for title {}'.format(title))
                 else:
                     print('Not found playcount from last.fm for title {}'.format(title))
@@ -169,7 +169,7 @@ class remove_wrong_values(luigi.Task):
         # keep only the rows has positive value of year
         df = df[df['Year'] > 0]
         print('Remove releases where there no selling price in discogs.com')
-        
+
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='columns', compression='infer'))
 
@@ -183,14 +183,14 @@ class merge_titles_data(luigi.Task):
 
     def output(self):
         return luigi.LocalTarget(self.input()['artist_releases'].path)
-    
+
     def run(self):
         releases_df = pd.read_json(self.input()['artist_releases'].path)
         playcounts_df = pd.read_json(self.input()['playcounts'].path)
 
         df = pd.merge(releases_df, playcounts_df, on='Title')
         print('Merge releases and playcounts data for artist {}'.format(self.name))
-        
+
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='records', compression='infer'))
 
@@ -208,8 +208,8 @@ class drop_duplicates_titles(luigi.Task):
         df = pd.read_json(self.input().path)
         df = df.drop_duplicates(subset=['Title'])
         print('find and remove the duplicates titles if exist')
-        df =  df.set_index('Title')
-    
+        df = df.set_index('Title')
+
         with self.output().open('w') as outfile:
             outfile.write(df.to_json(orient='index', compression='infer'))
 
@@ -223,12 +223,12 @@ class integrate_data(luigi.Task):
 
     def output(self):
         return luigi.LocalTarget('data/{}/{}.json'.format(self.name, self.name))
-    
+
     def run(self):
         # read specific artist content file
         with self.input()['artist_content'].open('r') as artist_content_file:
             content = json.load(artist_content_file)
-      
+
         # read specific artist releases file
         with self.input()['artist_releases'].open('r') as artist_releases_file:
             # add the releases to content dict
@@ -241,7 +241,8 @@ class integrate_data(luigi.Task):
 
 class load_to_database(luigi.Task):
     artist_names = luigi.ListParameter()
-    client = pymongo.MongoClient("mongodb+srv://user:AotD8lF0WspDIA4i@cluster0.qtikgbg.mongodb.net/?retryWrites=true&w=majority")
+    client = pymongo.MongoClient(
+        "mongodb+srv://user:AotD8lF0WspDIA4i@cluster0.qtikgbg.mongodb.net/?retryWrites=true&w=majority")
     db = client["mydatabase"]
     artists = db['artists']
 
@@ -253,13 +254,13 @@ class load_to_database(luigi.Task):
         data = {}
         for name in self.artist_names:
             with open('data/{}/{}.json'.format(name, name)) as artist_file:
-                data.update(json.load(artist_file)) 
+                data.update(json.load(artist_file))
 
         for artist in list(data.keys()):
-            self.artists.insert_one({'Artist': str(artist), 
-                                    'Description': data[str(artist)]['Description'],
-                                    'Releases': data[str(artist)]['Releases']
-                                    })
+            self.artists.insert_one({'Artist': str(artist),
+                                     'Description': data[str(artist)]['Description'],
+                                     'Releases': data[str(artist)]['Releases']
+                                     })
             print('Artist {} insert to DataBase!'.format(artist))
 
 
