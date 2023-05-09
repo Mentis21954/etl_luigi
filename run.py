@@ -84,9 +84,9 @@ class extract_info_for_titles(luigi.Task):
                                           'Year': source['year'],
                                           'Format': None,
                                           'Discogs Price': source['lowest_price']})
-            print("Found informations from discogs.com for {} {}'s titles".format(str((index + 1)), self.name))
-            # sleep 3 secs to don't miss requests
-            time.sleep(5)
+                print('Found informations from discogs.com for title {}'.format(source['title']))
+                # sleep 5 secs to don't miss requests
+                time.sleep(5)
 
         with self.output().open('w') as outfile:
             outfile.write(json.dumps(releases_info))
@@ -261,7 +261,7 @@ class load_to_database(luigi.Task):
                                      'Description': data[str(artist)]['Description'],
                                      'Releases': data[str(artist)]['Releases']
                                      })
-            print('Artist {} insert to DataBase!'.format(artist))
+            print('--- Artist {} insert to DataBase! ---'.format(artist))
 
 
 if __name__ == '__main__':
