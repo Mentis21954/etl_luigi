@@ -1,7 +1,7 @@
 import luigi
 import pandas as pd
-import time
 import requests
+import time
 import json
 import pymongo
 
@@ -17,8 +17,7 @@ class extract_info_from_artist(luigi.Task):
 
     def run(self):
         artist_contents = {}
-        url = ('https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=') + self.name + (
-            '&api_key=') + LASTFM_API_KEY + '&format=json'
+        url = 'https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=' + self.name + '&api_key=' + LASTFM_API_KEY + '&format=json'
         artist_info = requests.get(url).json()
         artist_contents.update({self.name: {'Content': artist_info['artist']['bio']['content']}})
         print('Search description from lastfm.com for artist {} ...'.format(self.name))
@@ -35,7 +34,7 @@ class extract_titles_from_artist(luigi.Task):
 
     def run(self):
         # get the artist id from artist name
-        url = 'https://api.discogs.com/database/search?q=' + self.name + ('&{?type=artist}&token=') + DISCOGS_API_KEY
+        url = 'https://api.discogs.com/database/search?q=' + self.name + '&{?type=artist}&token=' + DISCOGS_API_KEY
         discogs_artist_info = requests.get(url).json()
         id = discogs_artist_info['results'][0]['id']
 
@@ -69,7 +68,8 @@ class extract_info_for_titles(luigi.Task):
         releases_info = []
         for index in range(len(releases[self.name])):
             url = releases[self.name][index]['resource_url']
-            source = requests.get(url).json()
+            params = {'token': DISCOGS_API_KEY}
+            source = requests.get(url, params=params).json()
             # search if exists track's price
             if 'lowest_price' in source.keys():
                 if 'formats' in source.keys():
@@ -85,8 +85,8 @@ class extract_info_for_titles(luigi.Task):
                                           'Format': None,
                                           'Discogs Price': source['lowest_price']})
                 print('Found informations from discogs.com for title {}'.format(source['title']))
-                # sleep 5 secs to don't miss requests
-                time.sleep(5)
+                # sleep 4 secs to don't miss requests
+                time.sleep(4)
 
         with self.output().open('w') as outfile:
             outfile.write(json.dumps(releases_info))
@@ -268,4 +268,4 @@ if __name__ == '__main__':
     df = pd.read_csv('spotify_artist_data.csv')
     artist_names = list(df['Artist Name'].unique())
 
-    luigi.build([load_to_database(artist_names=artist_names[:2])], workers=2)
+    luigi.build([load_to_database(artist_names=artist_names[:4])], workers=8)
