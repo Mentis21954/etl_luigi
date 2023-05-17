@@ -195,11 +195,30 @@ class merge_titles_data(luigi.Task):
             outfile.write(df.to_json(orient='records', compression='infer'))
 
 
-class drop_duplicates_titles(luigi.Task):
+class sort_titles_by_price(luigi.Task):
     name = luigi.Parameter()
 
     def requires(self):
         return merge_titles_data(self.name)
+
+    def output(self):
+        return luigi.LocalTarget(self.input().path)
+
+    def run(self):
+        df = pd.read_json(self.input().path)
+        # sort descending
+        df = df.sort_values(['Discogs Price', 'Title'], ascending=False)
+        print('Sort titles by highest value')
+
+        with self.output().open('w') as outfile:
+            outfile.write(df.to_json(orient='records', compression='infer'))
+
+
+class drop_duplicates_titles(luigi.Task):
+    name = luigi.Parameter()
+
+    def requires(self):
+        return sort_titles_by_price(self.name)
 
     def output(self):
         return luigi.LocalTarget(self.input().path)
